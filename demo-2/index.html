@@ -1,0 +1,92 @@
+<!-- 学习参考: https://webglfundamentals.org/ -->
+
+<!DOCTYPE html>
+<html>
+  <script id="vertex-shader-2d" type="notjs">
+    attribute vec2 a_position;
+    uniform mat4 u_proj;
+    attribute vec3 a_color;
+    varying vec3 v_color;
+
+    void main(void) {
+      gl_Position = u_proj * vec4(a_position, 0, 1.0);
+      gl_PointSize = 15.0;
+      v_color = a_color;
+    }
+  </script>
+  <script id="fragment-shader-2d" type="notjs">
+    precision mediump float;
+    varying vec3 v_color;
+
+    void main() {
+      gl_FragColor = vec4(v_color, 1.0);
+    }
+  </script>
+  <body>
+    <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas>
+  </body>
+
+  <script>
+    const canvas = window.document.querySelector('#canvas');
+    const gl = canvas.getContext('webgl');
+    const canvasRect = canvas.getBoundingClientRect();
+    const pointArr = [];
+    const pointColorArr = [];
+
+    const vertexShaderSource = window.document.querySelector('#vertex-shader-2d').innerHTML;
+    const fragmentShaderSource = window.document.querySelector('#fragment-shader-2d').innerHTML;
+    
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(vertexShader, vertexShaderSource);
+    gl.shaderSource(fragmentShader, fragmentShaderSource);
+    gl.compileShader(vertexShader);
+    gl.compileShader(fragmentShader);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    gl.useProgram(program);
+    function createProjMat (left, right, top, bottom) {
+      return [
+        2 / (right - left), 0, 0, 0,
+        0, 2 / (top - bottom), 0, 0,
+        0, 0, 1, 0,
+        -(right - left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
+      ]
+    }
+    const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
+    const uProj = gl.getUniformLocation(program, 'u_proj');
+    gl.uniformMatrix4fv(uProj, false, projMat);
+    const uColor = gl.getUniformLocation(program, 'u_color');
+
+    function drawPoint (x, y) {
+      pointArr.push(x, y);
+      const posData = new Float32Array(pointArr);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      pointColorArr.push(Math.random(), Math.random(), Math.random());
+      const colorData = new Float32Array(pointColorArr);
+      const colorBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW);
+      const vColor = gl.getAttribLocation(program, 'a_color');
+      gl.enableVertexAttribArray(vColor);
+      gl.vertexAttribPointer(vColor, 3, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(gl.POINTS, 0, pointArr.length / 2);
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      drawPoint(e.clientX - canvasRect.left, e.clientY - canvasRect.top);
+    })
+
+  </script>
+</html>
