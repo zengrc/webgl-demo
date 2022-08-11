@@ -23,15 +23,22 @@
     }
   </script>
   <body>
+    <button id="button">画点</button>
     <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas>
   </body>
 
   <script>
+    let mode = 0; // 1画线，0画点
     const canvas = window.document.querySelector('#canvas');
+    const button = window.document.querySelector('#button');
     const gl = canvas.getContext('webgl');
     const canvasRect = canvas.getBoundingClientRect();
-    const pointArr = [];
-    const pointColorArr = [];
+    let pointArr = [];
+    let pointColorArr = [];
+    let startDraw = false;
+    let lineColor = [0, 0, 0];
+    const lineStart = { x: 0, y: 0 };
+    const lineEnd = { x: 0, y: 0 };
 
     const vertexShaderSource = window.document.querySelector('#vertex-shader-2d').innerHTML;
     const fragmentShaderSource = window.document.querySelector('#fragment-shader-2d').innerHTML;
@@ -60,7 +67,6 @@
     const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
     const uProj = gl.getUniformLocation(program, 'u_proj');
     gl.uniformMatrix4fv(uProj, false, projMat);
-    const uColor = gl.getUniformLocation(program, 'u_color');
 
     function drawPoint (x, y) {
       pointArr.push(x, y);
@@ -77,16 +83,66 @@
       const colorBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW);
-      const vColor = gl.getAttribLocation(program, 'a_color');
-      gl.enableVertexAttribArray(vColor);
-      gl.vertexAttribPointer(vColor, 3, gl.FLOAT, false, 0, 0);
+      const aColor = gl.getAttribLocation(program, 'a_color');
+      gl.enableVertexAttribArray(aColor);
+      gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
 
       gl.drawArrays(gl.POINTS, 0, pointArr.length / 2);
     }
 
+    function drawLine () {
+      const drawPoints = [...pointArr, lineStart.x, lineStart.y, lineEnd.x, lineEnd.y];
+      const posData = new Float32Array(drawPoints);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      const colorArr = [...pointColorArr, ...lineColor, ...lineColor]; // 两个顶点都要有一个颜色
+      const colorData = new Float32Array(colorArr);
+      const colorBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW);
+      const vColor = gl.getAttribLocation(program, 'a_color');
+      gl.enableVertexAttribArray(vColor);
+      gl.vertexAttribPointer(vColor, 3, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(gl.LINES, 0, drawPoints.length / 2);
+    }
+
     canvas.addEventListener('mousedown', (e) => {
-      drawPoint(e.clientX - canvasRect.left, e.clientY - canvasRect.top);
-    })
+      startDraw = true;
+      // 起点
+      lineStart.x = e.clientX - canvasRect.left;
+      lineStart.y = e.clientY - canvasRect.top;
+      lineColor = [Math.random(), Math.random(), Math.random()];
+      if (mode === 0) drawPoint(lineStart.x, lineStart.y);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (mode === 0 || !startDraw) return;
+      // 终点
+      lineEnd.x = e.clientX - canvasRect.left;
+      lineEnd.y = e.clientY - canvasRect.top;
+      drawLine();
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      startDraw = false;
+      if (mode === 0) return;
+      pointArr.push(lineStart.x, lineStart.y, lineEnd.x, lineEnd.y);
+      pointColorArr.push(...lineColor, ...lineColor);
+    });
+
+    button.addEventListener('mousedown', () => {
+      mode = (mode + 1) % 2;
+      if (mode === 0) button.innerHTML = '画点';
+      else button.innerHTML = '画线';
+      pointColorArr = [];
+      pointArr = [];
+    });
 
   </script>
 </html>
