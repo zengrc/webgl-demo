@@ -100,7 +100,7 @@
       gl.enableVertexAttribArray(aPos);
       gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-      const colorArr = [...pointColorArr, ...lineColor, ...lineColor]; // 两个顶点都要有一个颜色
+      const colorArr = [...pointColorArr, ...lineColor]; // 两个顶点都要有一个颜色
       const colorData = new Float32Array(colorArr);
       const colorBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
@@ -117,7 +117,7 @@
       // 起点
       lineStart.x = e.clientX - canvasRect.left;
       lineStart.y = e.clientY - canvasRect.top;
-      lineColor = [Math.random(), Math.random(), Math.random()];
+      lineColor = [Math.random(), Math.random(), Math.random(), Math.random(), Math.random(), Math.random()];
       if (mode === 0) drawPoint(lineStart.x, lineStart.y);
     });
 
@@ -133,7 +133,7 @@
       startDraw = false;
       if (mode === 0) return;
       pointArr.push(lineStart.x, lineStart.y, lineEnd.x, lineEnd.y);
-      pointColorArr.push(...lineColor, ...lineColor);
+      pointColorArr.push(...lineColor);
     });
 
     button.addEventListener('mousedown', () => {
