@@ -66,7 +66,7 @@
         2 / (right - left), 0, 0, 0,
         0, 2 / (top - bottom), 0, 0,
         0, 0, 1, 0,
-        -(right - left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
+        -(right + left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
       ]
     }
     const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
