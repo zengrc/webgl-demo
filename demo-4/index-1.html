@@ -1,0 +1,230 @@
+<!-- 学习参考: https://webglfundamentals.org/ -->
+
+<!DOCTYPE html>
+<html>
+  <script id="vertex-shader-2d" type="notjs">
+    attribute vec2 a_position;
+    uniform mat4 u_proj;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+
+    void main(void) {
+      gl_Position = u_proj * vec4(a_position, 0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  </script>
+  <script id="fragment-shader-2d" type="notjs">
+    precision mediump float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_image; 
+
+    void main() {
+      vec4 texture = texture2D(u_image, v_texCoord);
+      gl_FragColor = texture;
+    }
+  </script>
+  <body>
+    <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas><br>
+    <input id="input" type="file" accept="image/png,image/jpeg"></input>
+  </body>
+
+  <script>
+    const canvas = window.document.querySelector('#canvas');
+    const input = window.document.querySelector('#input');
+    const gl = canvas.getContext('webgl');
+    const canvasRect = canvas.getBoundingClientRect();
+    let img;
+    let positionArr = [];
+    let imgW = 0;
+    let imgH = 0;
+    let texture;
+    const previewScale = 1.5;
+    const texCoord = [
+      0, 0,
+      1, 0,
+      0, 1,
+      1, 1,
+    ];
+    const previewDrawTexCoord = [
+      0, 1,
+      1, 1,
+      0, 0,
+      1, 0,
+    ];
+    const previewW = 60;
+    const previewH = 120;
+    const { clientWidth, clientHeight } = canvas;
+    const previewPosArr = [
+      clientWidth - previewW, clientHeight - previewH,
+      clientWidth, clientHeight - previewH,
+      clientWidth - previewW, clientHeight,
+      clientWidth, clientHeight,
+    ];
+    const previewDrawArr = [
+      0, 0,
+      clientWidth, 0,
+      0, clientHeight,
+      clientWidth, clientHeight
+    ];
+
+    const vertexShaderSource = window.document.querySelector('#vertex-shader-2d').innerHTML;
+    const fragmentShaderSource = window.document.querySelector('#fragment-shader-2d').innerHTML;
+    
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(vertexShader, vertexShaderSource);
+    gl.shaderSource(fragmentShader, fragmentShaderSource);
+    gl.compileShader(vertexShader);
+    gl.compileShader(fragmentShader);
+    const framebuffer = gl.createFramebuffer();
+
+    function createProgram (shaderList) {
+      const program = gl.createProgram();
+      shaderList.forEach(shader => {
+        gl.attachShader(program, shader);
+      });
+      gl.linkProgram(program);
+      return program;
+    }
+
+    const program = createProgram([vertexShader, fragmentShader]);
+    gl.useProgram(program);
+    function createProjMat (left, right, top, bottom) {
+      return [
+        2 / (right - left), 0, 0, 0,
+        0, 2 / (top - bottom), 0, 0,
+        0, 0, 1, 0,
+        -(right + left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
+      ]
+    }
+    const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
+    const uProj = gl.getUniformLocation(program, 'u_proj');
+    gl.uniformMatrix4fv(uProj, false, projMat);
+
+    function createTexture(img, level) {
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      const uImage = gl.getUniformLocation(program, 'u_image');
+      gl.uniform1i(uImage, level);
+      gl.texImage2D(gl.TEXTURE_2D, level, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+      return texture;
+    }
+
+    function attachTexture(width, height, framebuffer, level) {
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      // 
+      gl.texImage2D(gl.TEXTURE_2D, level, gl.RGBA, width, height, level, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      // 
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, level);
+
+      return texture;
+    }
+
+    function drawImage (framebuffer, array, texCoord) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      if (framebuffer) {
+        gl.viewport(0, 0, previewW, previewH);
+        gl.clearColor(0, 0, 0, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      }
+      else {
+        gl.viewport(0, 0, clientWidth, clientHeight);
+      }
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 纹理坐标数据
+      const texData = new Float32Array(texCoord);
+      const texBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, texData, gl.STATIC_DRAW);
+      const aTex = gl.getAttribLocation(program, 'a_texCoord');
+      gl.enableVertexAttribArray(aTex);
+      gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function onImgLoad () {
+      const { width, height } = img;
+      const drawHeight = clientHeight;
+      const drawWidth = clientWidth;
+      // 以高度为基准，调整宽度，并居中绘制图案
+      const fixWidth = width * drawHeight / height;
+      imgW = fixWidth;
+      imgH = drawHeight;
+      positionArr = [
+        0, 0,
+        imgW, 0,
+        0, imgH,
+        imgW, imgH,
+      ];
+      
+      texture = createTexture(img, 0);
+      drawImage(null, positionArr, texCoord);
+    }
+
+    input.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const _URL = window.URL || window.webkitURL;
+        const url = _URL.createObjectURL(file);
+        img = new Image();
+        img.onload = onImgLoad;
+        img.src = url;
+      }
+    });
+
+    const aTexture = attachTexture(previewW, previewH, framebuffer, 0);
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!img || !img.src) return;
+      let { clientX, clientY } = e;
+      const previewSize = {
+        width: previewW / previewScale,
+        height: previewH / previewScale
+      };
+      if (clientX - previewSize.width / 2 < 0) clientX = previewSize.width / 2;
+      else if (clientX + previewSize.width / 2 > imgW) clientX = imgW - previewSize.width / 2;
+      if (clientY - previewSize.height / 2 < 0) clientY = previewSize.height / 2;
+      else if (clientY + previewSize.height / 2 > imgH) clientY = imgH - previewSize.height / 2;
+      // The texture coordinate (0, 0) does not refer to the top-left or bottom-left pixel of a texture, it refers to the first pixel of a texture. Similarly (1, 1) does not refer to the bottom-right or top-right pixel but rather to the last pixel
+      // https://stackoverflow.com/questions/48124001/opengl-texture-coordinates-are-opposite-when-reading-from-a-framebuffer-object
+      const previewTexCoord = [
+        (clientX - previewSize.width / 2) / imgW, (clientY - previewSize.height / 2) / imgH,
+        (clientX + previewSize.width / 2) / imgW, (clientY - previewSize.height / 2) / imgH,
+        (clientX - previewSize.width / 2) / imgW, (clientY + previewSize.height / 2) / imgH,
+        (clientX + previewSize.width / 2) / imgW, (clientY + previewSize.height / 2) / imgH,
+      ];
+
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      drawImage(framebuffer, previewDrawArr, previewTexCoord);
+
+      drawImage(null, positionArr, texCoord);
+      
+      gl.bindTexture(gl.TEXTURE_2D, aTexture);
+      drawImage(null, previewPosArr, previewDrawTexCoord);
+    });
+    
+  </script>
+</html>
