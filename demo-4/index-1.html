@@ -25,12 +25,16 @@
   </script>
   <body>
     <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas><br>
-    <input id="input" type="file" accept="image/png,image/jpeg"></input>
+    <input id="input" type="file" accept="image/webp,image/png,image/jpeg"></input>
+    <br>
+    <span>缩放倍数</span>
+    <input id="scale" type="text" />
   </body>
 
   <script>
     const canvas = window.document.querySelector('#canvas');
     const input = window.document.querySelector('#input');
+    const scaleInput = window.document.querySelector('#scale');
     const gl = canvas.getContext('webgl');
     const canvasRect = canvas.getBoundingClientRect();
     let img;
@@ -38,7 +42,8 @@
     let imgW = 0;
     let imgH = 0;
     let texture;
-    const previewScale = 1.5;
+    let previewScale = 1.5;
+    scaleInput.value = previewScale;
     const texCoord = [
       0, 0,
       1, 0,
@@ -193,6 +198,11 @@
         img.onload = onImgLoad;
         img.src = url;
       }
+    });
+
+    scaleInput.addEventListener('change', () => {
+      console.dir(scaleInput.value)
+      previewScale = +scaleInput.value || 1.5
     });
 
     const aTexture = attachTexture(previewW, previewH, framebuffer, 0);
