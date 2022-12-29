@@ -1,0 +1,241 @@
+<!-- 学习参考: https://webglfundamentals.org/ -->
+
+<!DOCTYPE html>
+<html>
+  <script id="vertex-shader-2d" type="notjs">
+    attribute vec2 a_position;
+    uniform mat4 u_proj;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+
+    void main(void) {
+      gl_Position = u_proj * vec4(a_position, 0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  </script>
+  <script id="fragment-shader-2d" type="notjs">
+    precision mediump float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_image;
+
+    void main() {
+      vec4 texture = texture2D(u_image, v_texCoord);
+      gl_FragColor = texture;
+    }
+  </script>
+  <script id="fragment-shader-2d-pick" type="notjs">
+    precision mediump float;
+    varying vec2 v_texCoord;
+    uniform vec3 u_color;
+    uniform sampler2D u_image;
+
+    void main() {
+      vec4 texture = texture2D(u_image, v_texCoord);
+      gl_FragColor = vec4(u_color, texture.a);
+    }
+  </script>
+  <body>
+    <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas><br>
+    <input id="input" type="file" accept="image/webp,image/png,image/jpeg" multiple></input>
+  </body>
+
+  <script>
+    const canvas = window.document.querySelector('#canvas');
+    const input = window.document.querySelector('#input');
+    const gl = canvas.getContext('webgl');
+    const canvasRect = canvas.getBoundingClientRect();
+    const imgList = [];
+    const texCoord = [
+      0, 0,
+      1, 0,
+      0, 1,
+      1, 1,
+    ];
+    const { clientWidth, clientHeight } = canvas;
+    const vertexShaderSource = window.document.querySelector('#vertex-shader-2d').innerHTML;
+    const fragmentShaderSource = window.document.querySelector('#fragment-shader-2d').innerHTML;
+    const pickFragShaderSource = window.document.querySelector('#fragment-shader-2d-pick').innerHTML;
+    
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    const pickFragShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(vertexShader, vertexShaderSource);
+    gl.shaderSource(fragmentShader, fragmentShaderSource);
+    gl.shaderSource(pickFragShader, pickFragShaderSource);
+    gl.compileShader(vertexShader);
+    gl.compileShader(fragmentShader);
+    gl.compileShader(pickFragShader);
+
+    function createFramebuffer() {
+      const framebuffer = gl.createFramebuffer();
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      // 
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, clientWidth, clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      // 
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+      return framebuffer;
+    }
+
+    const framebuffer = createFramebuffer();
+
+    function createProgram (shaderList) {
+      const program = gl.createProgram();
+      shaderList.forEach(shader => {
+        gl.attachShader(program, shader);
+      });
+      gl.linkProgram(program);
+      return program;
+    }
+
+    const program = createProgram([vertexShader, fragmentShader]);
+    const pickProgram = createProgram([vertexShader, pickFragShader]);
+    function createProjMat (left, right, top, bottom) {
+      return [
+        2 / (right - left), 0, 0, 0,
+        0, 2 / (top - bottom), 0, 0,
+        0, 0, 1, 0,
+        -(right + left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
+      ]
+    }
+    const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
+    gl.useProgram(program);
+    const uProj = gl.getUniformLocation(program, 'u_proj');
+    gl.uniformMatrix4fv(uProj, false, projMat);
+    gl.useProgram(pickProgram);
+    const pickUProj = gl.getUniformLocation(pickProgram, 'u_proj');
+    gl.uniformMatrix4fv(pickUProj, false, projMat);
+
+    function createTexture(img) {
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.useProgram(program)
+      const uImage = gl.getUniformLocation(program, 'u_image');
+      gl.uniform1i(uImage, 0);
+      gl.useProgram(pickProgram)
+      const pickUImage = gl.getUniformLocation(pickProgram, 'u_image');
+      gl.uniform1i(pickUImage, 0);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+      return texture;
+    }
+
+    function clearCanvas (framebuffer) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.clearColor(0, 0, 0, 0.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+
+    function drawImage (array, texCoord) {
+      gl.useProgram(program);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 纹理坐标数据
+      const texData = new Float32Array(texCoord);
+      const texBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, texData, gl.STATIC_DRAW);
+      const aTex = gl.getAttribLocation(program, 'a_texCoord');
+      gl.enableVertexAttribArray(aTex);
+      gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function drawPick (framebuffer, array, colorArr) {
+      gl.useProgram(pickProgram);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(pickProgram, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 颜色uid
+      const uColor = gl.getUniformLocation(pickProgram, 'u_color');
+      gl.uniform3fv(uColor, new Uint8Array(colorArr));
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function onImgLoad (img, index, name) {
+      const flag1 = index % 2 === 0;
+      const flag2 = index < 2;
+
+      const left = flag1 ? 0 : clientWidth / 2 + 30;
+      const right = flag1 ? clientWidth / 2 - 30 : clientWidth;
+      const top = flag2 ? 0 : clientHeight / 2  + 30;
+      const bottom = flag2 ? clientHeight / 2 - 30 : clientHeight;
+
+      const positionArr = [
+        left, top,
+        right, top,
+        left, bottom,
+        right, bottom
+      ];
+
+      const uid = [flag1 ? 255 : 0, flag2 ? 255 : 0, 0];
+
+      imgList.push({
+        src: img,
+        posArr: positionArr,
+        uid,
+        name
+      });
+
+      const texture = createTexture(img);
+      drawImage(positionArr, texCoord);
+      drawPick(framebuffer, positionArr, uid);
+    }
+
+    input.addEventListener('change', (e) => {
+      const files = e.target.files;
+      if (files && files.length) {
+        Array.prototype.slice.call(files, 0, 4).forEach((file, index) => {
+          const _URL = window.URL || window.webkitURL;
+          const url = _URL.createObjectURL(file);
+          const { name } = file;
+          imgList.splice(0, imgList.length);
+          const img = new Image();
+          img.onload = () => onImgLoad(img, index, name);
+          img.src = url;
+        });
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!imgList.length) return;
+      let { clientX, clientY } = e;
+      const pixels = new Uint8Array(4);
+      gl.readPixels(clientX, clientHeight - clientY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      const floatArr = Array.from(pixels)
+      const pick = imgList.filter(img => floatArr[3] && img.uid[0] === floatArr[0] && img.uid[1] === floatArr[1])[0];
+      if (pick) console.log(pick.name);
+    });
+    
+  </script>
+</html>
