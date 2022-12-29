@@ -5,11 +5,12 @@
   <script id="vertex-shader-2d" type="notjs">
     attribute vec2 a_position;
     uniform mat4 u_proj;
+    uniform mat4 u_translate;
     attribute vec2 a_texCoord;
     varying vec2 v_texCoord;
 
     void main(void) {
-      gl_Position = u_proj * vec4(a_position, 0, 1.0);
+      gl_Position = u_proj * u_translate * vec4(a_position, 0, 1.0);
       v_texCoord = a_texCoord;
     }
   </script>
@@ -42,6 +43,7 @@
     const gl = canvas.getContext('webgl');
     const canvasRect = canvas.getBoundingClientRect();
     const imgList = [];
+    let pick = undefined;
     const texCoord = [
       0, 0,
       1, 0,
@@ -102,6 +104,14 @@
         -(right + left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
       ]
     }
+    function createTranslateMat(tx, ty) { // 平移矩阵
+      return [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          tx, ty, 0, 1
+      ]
+    };
     const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
     gl.useProgram(program);
     const uProj = gl.getUniformLocation(program, 'u_proj');
@@ -126,13 +136,14 @@
       return texture;
     }
 
-    function clearCanvas (framebuffer) {
+    function clearBuffer (framebuffer) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.clearColor(0, 0, 0, 0.0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
 
-    function drawImage (array, texCoord) {
+    function drawImage (info) {
+      const array = info.posArr;
       gl.useProgram(program);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       // 顶点数据
@@ -153,10 +164,17 @@
       gl.enableVertexAttribArray(aTex);
       gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
 
+      // 平移矩阵
+      const transMat = createTranslateMat(info.translate.x, info.translate.y);
+      const uTrans = gl.getUniformLocation(program, 'u_translate');
+      gl.uniformMatrix4fv(uTrans, false, transMat);
+
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    function drawPick (framebuffer, array, colorArr) {
+    function drawPick (framebuffer, info) {
+      const array = info.posArr;
+      const colorArr = info.uid;
       gl.useProgram(pickProgram);
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       // 顶点数据
@@ -171,6 +189,11 @@
       // 颜色uid
       const uColor = gl.getUniformLocation(pickProgram, 'u_color');
       gl.uniform4fv(uColor, new Uint8Array(colorArr));
+
+      // 平移矩阵
+      const transMat = createTranslateMat(info.translate.x, info.translate.y);
+      const uTrans = gl.getUniformLocation(pickProgram, 'u_translate');
+      gl.uniformMatrix4fv(uTrans, false, transMat);
 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
@@ -193,28 +216,32 @@
 
       const uid = [flag1 ? 255 : 0, flag2 ? 255 : 0, 0, 255];
 
-      imgList.push({
+      const imgInfo = {
         src: img,
         posArr: positionArr,
         uid,
-        name
-      });
+        name,
+        originClick: { x: 0, y: 0 },
+        translate: { x: 0, y: 0 }
+      };
+
+      imgList.push(imgInfo);
 
       gl.useProgram(program);
       const texture = createTexture(img, 0);
-      drawImage(positionArr, texCoord);
-      drawPick(framebuffer, positionArr, uid);
+      drawImage(imgInfo);
     }
 
     function render (opt = { pick: true, canvas: true }) {
+      clearBuffer(framebuffer);
       imgList.forEach((img) => {
         if (opt.canvas) {
           gl.useProgram(program);
           const texture = createTexture(img.src, 0);
-          drawImage(img.posArr, texCoord);
+          drawImage(img);
         }
         if (opt.pick) {
-          drawPick(framebuffer, img.posArr, img.uid);
+          drawPick(framebuffer, img);
         }
       });
     }
@@ -227,6 +254,7 @@
           const url = _URL.createObjectURL(file);
           const { name } = file;
           imgList.splice(0, imgList.length);
+          pick = undefined;
           const img = new Image();
           img.onload = () => onImgLoad(img, index, name);
           img.src = url;
@@ -234,15 +262,34 @@
       }
     });
 
-    canvas.addEventListener('mousemove', (e) => {
+    canvas.addEventListener('mousedown', (e) => {
       if (!imgList.length) return;
       let { clientX, clientY } = e;
-      // render({ pick: true });
+      // 选中不会产生移动，只判断离线屏即可
+      render({ pick: true });
       const pixels = new Uint8Array(4);
       gl.readPixels(clientX, clientHeight - clientY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       const floatArr = Array.from(pixels)
-      const pick = imgList.filter(img => floatArr[3] && img.uid[0] === floatArr[0] && img.uid[1] === floatArr[1])[0];
-      if (pick) console.log(pick.name);
+      pick = imgList.filter(img => floatArr[3] && img.uid[0] === floatArr[0] && img.uid[1] === floatArr[1])[0];
+      if (pick) {
+        console.log('pick up:', pick.name);
+        // 再次点击时，可能已经产生移动，需要将已产生移动的距离扣减，下次再发生移动时，才会从所在位置开始移动，否则回回到原点再移动
+        pick.originClick = { x: clientX - pick.translate.x, y: clientY - pick.translate.y };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!pick) return;
+      let { clientX, clientY } = e;
+      const dx = clientX - pick.originClick.x;
+      const dy = clientY - pick.originClick.y;
+      pick.translate = { x: dx, y: dy };
+      // 移动不需要判断是否选中，只更新canvas即可
+      render({ canvas: true });
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      pick = undefined;
     });
     
   </script>
