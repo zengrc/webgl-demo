@@ -1,0 +1,377 @@
+<!-- 学习参考: https://webglfundamentals.org/ -->
+
+<!DOCTYPE html>
+<html>
+  <script id="vertex-shader-2d" type="notjs">
+    attribute vec2 a_position;
+    uniform mat4 u_proj;
+    uniform mat4 u_translate;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+
+    void main(void) {
+      gl_Position = u_proj * u_translate * vec4(a_position, 0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  </script>
+  <script id="fragment-shader-2d" type="notjs">
+    precision mediump float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_image;
+
+    void main() {
+      vec4 texture = texture2D(u_image, v_texCoord);
+      gl_FragColor = texture;
+    }
+  </script>
+  <script id="fragment-shader-2d-simple" type="notjs">
+    precision mediump float;
+    uniform vec4 u_color;
+
+    void main() {
+      gl_FragColor = u_color;
+    }
+  </script>
+  <body>
+    <canvas id="canvas" width="500" height="300" style="background-color: black;"></canvas><br>
+    <input id="input" type="file" accept="image/webp,image/png,image/jpeg"></input>
+  </body>
+
+  <script>
+    const canvas = window.document.querySelector('#canvas');
+    const input = window.document.querySelector('#input');
+    const gl = canvas.getContext('webgl', { stencil: true });
+    const canvasRect = canvas.getBoundingClientRect();
+    const imgList = [];
+    let pick = undefined;
+    const texCoord = [
+      0, 0,
+      1, 0,
+      0, 1,
+      1, 1,
+    ];
+    const { clientWidth, clientHeight } = canvas;
+    const vertexShaderSource = window.document.querySelector('#vertex-shader-2d').innerHTML;
+    const fragmentShaderSource = window.document.querySelector('#fragment-shader-2d').innerHTML;
+    const simpleFragShaderSource = window.document.querySelector('#fragment-shader-2d-simple').innerHTML;
+    
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    const simpleFragShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(vertexShader, vertexShaderSource);
+    gl.shaderSource(fragmentShader, fragmentShaderSource);
+    gl.shaderSource(simpleFragShader, simpleFragShaderSource);
+    gl.compileShader(vertexShader);
+    gl.compileShader(fragmentShader);
+    gl.compileShader(simpleFragShader);
+
+    function createFramebuffer() {
+      const framebuffer = gl.createFramebuffer();
+      const renderBuffer = gl.createRenderbuffer();
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      // 
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, clientWidth, clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, renderBuffer);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_STENCIL, gl.canvas.width, gl.canvas.height); 
+      // 
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, renderBuffer)
+
+      return framebuffer;
+    }
+
+    const framebuffer = createFramebuffer();
+
+    function createProgram (shaderList) {
+      const program = gl.createProgram();
+      shaderList.forEach(shader => {
+        gl.attachShader(program, shader);
+      });
+      gl.linkProgram(program);
+      return program;
+    }
+
+    const program = createProgram([vertexShader, fragmentShader]);
+    const simpleProgram = createProgram([vertexShader, simpleFragShader]);
+    function createProjMat (left, right, top, bottom) {
+      return [
+        2 / (right - left), 0, 0, 0,
+        0, 2 / (top - bottom), 0, 0,
+        0, 0, 1, 0,
+        -(right + left) / (right - left), -(bottom + top)/(top - bottom), 0, 1
+      ]
+    }
+    function createTranslateMat(tx, ty) { // 平移矩阵
+      return [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          tx, ty, 0, 1
+      ]
+    };
+    const projMat = createProjMat(0, gl.canvas.width, 0, gl.canvas.height);
+    gl.useProgram(program);
+    const uProj = gl.getUniformLocation(program, 'u_proj');
+    gl.uniformMatrix4fv(uProj, false, projMat);
+    gl.useProgram(simpleProgram);
+    const simpleUProj = gl.getUniformLocation(simpleProgram, 'u_proj');
+    gl.uniformMatrix4fv(simpleUProj, false, projMat);
+
+    function createTexture(img, level) {
+      // 设置纹理
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // 纹理参数
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      const uImage = gl.getUniformLocation(program, 'u_image');
+      gl.uniform1i(uImage, level);
+      gl.texImage2D(gl.TEXTURE_2D, level, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+      return texture;
+    }
+
+    function clearBuffer (framebuffer) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.clearColor(0, 0, 0, 0.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    }
+
+    function drawImage (info) {
+      const array = info.posArr;
+      gl.useProgram(program);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // 设置下一次模版数据
+      gl.stencilFunc(
+        gl.EQUAL,
+        0,
+        0xFF,
+      );
+      gl.stencilOp(
+        gl.KEEP,
+        gl.KEEP,
+        gl.KEEP,
+      );
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 纹理坐标数据
+      const texData = new Float32Array(texCoord);
+      const texBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, texData, gl.STATIC_DRAW);
+      const aTex = gl.getAttribLocation(program, 'a_texCoord');
+      gl.enableVertexAttribArray(aTex);
+      gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+      // 平移矩阵
+      const transMat = createTranslateMat(info.translate.x, info.translate.y);
+      const uTrans = gl.getUniformLocation(program, 'u_translate');
+      gl.uniformMatrix4fv(uTrans, false, transMat);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function drawMask (posArr, framebuffer) {
+      const array = posArr;
+      const colorArr = [0, 0, 0, 0];
+      gl.useProgram(simpleProgram);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer || null);
+      gl.enable(gl.STENCIL_TEST);
+      // 往模版缓冲里塞数据
+      gl.stencilFunc(
+        gl.ALWAYS,
+        1,
+        0xFF,
+      );
+      gl.stencilOp(
+        gl.KEEP,
+        gl.KEEP,
+        gl.REPLACE,
+      );
+
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(simpleProgram, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 颜色uid
+      const uColor = gl.getUniformLocation(simpleProgram, 'u_color');
+      gl.uniform4fv(uColor, new Uint8Array(colorArr));
+
+      // 平移矩阵
+      const transMat = createTranslateMat(0, 0);
+      const uTrans = gl.getUniformLocation(simpleProgram, 'u_translate');
+      gl.uniformMatrix4fv(uTrans, false, transMat);
+
+      gl.drawArrays(gl.TRIANGLE_FAN, 0, array.length / 2);
+    }
+
+    function drawPick (framebuffer, info) {
+      const array = info.posArr;
+      const colorArr = info.uid;
+      gl.useProgram(simpleProgram);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      // 设置下一次模版数据
+      gl.stencilFunc(
+        gl.EQUAL,
+        0,
+        0xFF,
+      );
+      gl.stencilOp(
+        gl.KEEP,
+        gl.KEEP,
+        gl.KEEP,
+      );
+      // 顶点数据
+      const posData = new Float32Array(array);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(simpleProgram, 'a_position');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // 颜色uid
+      const uColor = gl.getUniformLocation(simpleProgram, 'u_color');
+      gl.uniform4fv(uColor, new Uint8Array(colorArr));
+
+      // 平移矩阵
+      const transMat = createTranslateMat(info.translate.x, info.translate.y);
+      const uTrans = gl.getUniformLocation(simpleProgram, 'u_translate');
+      gl.uniformMatrix4fv(uTrans, false, transMat);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function onImgLoad (img, name) {
+      const { width: imgW, height: imgH } = img;
+      const rate1 = imgW / clientWidth;
+      const rate2 = imgH / clientHeight;
+
+      let rate, width, height;
+
+      if (rate1 < rate2) { // 以高为基准
+        rate = rate2;
+        height = clientHeight
+        width = imgW / rate2
+      } else {
+        rate = rate1;
+        height = imgH / rate1
+        width = clientWidth
+      }
+
+      const left = clientWidth / 2 - width / 2;
+      const right = clientWidth / 2 + width / 2;
+      const top = clientHeight / 2 - height / 2;
+      const bottom = clientHeight / 2 + height / 2;
+
+      const positionArr = [
+        left, top,
+        right, top,
+        left, bottom,
+        right, bottom
+      ];
+
+      const uid = [255, 0, 0, 255];
+
+      const imgInfo = {
+        src: img,
+        posArr: positionArr,
+        uid,
+        name,
+        originClick: { x: 0, y: 0 },
+        translate: { x: 0, y: 0 }
+      };
+
+      imgList.push(imgInfo);
+      render({ canvas: true })
+    }
+
+    function render (opt = { pick: true, canvas: true }) {
+      clearBuffer(framebuffer);
+      // if (opt.canvas) {
+      //   drawMask([100, 100, clientWidth - 100, 100, clientWidth - 100, clientHeight - 100, 100, clientHeight - 100]);
+      // }
+      // if (opt.pick) {
+      //   drawMask([100, 100, clientWidth - 100, 100, clientWidth - 100, clientHeight - 100, 100, clientHeight - 100], framebuffer);
+      // }
+      imgList.forEach((img) => {
+        if (opt.canvas) {
+          drawMask([100, 100, clientWidth - 100, 100, clientWidth - 100, clientHeight - 100, 100, clientHeight - 100]);
+          gl.useProgram(program);
+          const texture = createTexture(img.src, 0);
+          drawImage(img);
+        }
+        if (opt.pick) {
+          drawMask([100, 100, clientWidth - 100, 100, clientWidth - 100, clientHeight - 100, 100, clientHeight - 100], framebuffer);
+          drawPick(framebuffer, img);
+        }
+      });
+    }
+
+    input.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const _URL = window.URL || window.webkitURL;
+        const url = _URL.createObjectURL(file);
+        const { name } = file;
+        imgList.splice(0, imgList.length);
+        pick = undefined;
+        const img = new Image();
+        img.onload = () => onImgLoad(img, name);
+        img.src = url;
+      }
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!imgList.length) return;
+      let { clientX, clientY } = e;
+      // 选中不会产生移动，只判断离线屏即可
+      render({ pick: true });
+      const pixels = new Uint8Array(4);
+      gl.readPixels(clientX, clientHeight - clientY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      const floatArr = Array.from(pixels)
+      pick = imgList.filter(img => floatArr[3] && img.uid[0] === floatArr[0] && img.uid[1] === floatArr[1])[0];
+      if (pick) {
+        console.log('pick up:', pick.name);
+        // 再次点击时，可能已经产生移动，需要将已产生移动的距离扣减，下次再发生移动时，才会从所在位置开始移动，否则回回到原点再移动
+        pick.originClick = { x: clientX - pick.translate.x, y: clientY - pick.translate.y };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!pick) return;
+      let { clientX, clientY } = e;
+      const dx = clientX - pick.originClick.x;
+      const dy = clientY - pick.originClick.y;
+      pick.translate = { x: dx, y: dy };
+      // 移动不需要判断是否选中，只更新canvas即可
+      render({ canvas: true });
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      pick = undefined;
+    });
+    
+  </script>
+</html>
